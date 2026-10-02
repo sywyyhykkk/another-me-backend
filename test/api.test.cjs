@@ -38,7 +38,8 @@ test('HTTP 登录、档案与地理服务', async t => {
         countryName: lat > 0 ? 'China' : 'Argentina', countryCode: lat > 0 ? 'CN' : 'AR',
         adminName1: 'Region', lat: String(lat), lng: String(lng), distance: '5' }] });
     }
-    if (url.pathname === '/oceanJSON') return Response.json({ ocean: { name: 'South Pacific Ocean' } });
+    if (url.pathname === '/oceanJSON') return Response.json(oceanMode ? { ocean: { name: 'South Pacific Ocean' } } : {});
+    if (url.pathname === '/countrySubdivisionJSON') return Response.json(oceanMode ? {} : {countryCode:'AR',countryName:'Argentina',adminName1:'Region'});
     assert.equal(url.pathname, '/timezoneJSON');
     return Response.json({ timezoneId: lat > 0 ? 'Asia/Shanghai' : 'America/Argentina/Buenos_Aires',
       countryCode: lat > 0 ? 'CN' : 'AR', countryName: lat > 0 ? 'China' : 'Argentina',
@@ -62,7 +63,7 @@ test('HTTP 登录、档案与地理服务', async t => {
     originLocation: { mode, cityName: mode === 'device' ? '当前位置' : '上海', countryName: '中国', latitude, longitude },
     selectedAvatar: { id: role, role, name: '测试形象', emoji: '💼' }, targetMode: 'antipode',
   });
-  let tokenA, tokenB, first, second;
+  let tokenA, tokenB, first, second, shared;
   try {
     await start();
     await t.test('登录只返回会话，拒绝缺失或无效 code', async () => {
@@ -94,19 +95,23 @@ test('HTTP 登录、档案与地理服务', async t => {
       }
       assert.equal((await call('/geo/origin', 'POST', { latitude: '31', longitude: 121 }, tokenA)).status, 400);
     });
-    await t.test('手动选城创建档案，返回活动、日程、分享和占位视频', async () => {
+    await t.test('手动选城创建档案，返回同步活动、日程与双世界内容', async () => {
       const created = await call('/profiles', 'POST', { ...payload(), openid: 'user-b' }, tokenA);
       assert.equal(created.status, 201);
       first = created.body.data;
       assert.equal(first.openid, 'user-a');
-      assert.deepEqual(first.antipode, { latitude: -31.2304, longitude: -58.5263 });
+      assert.deepEqual(first.antipode, {latitude:-31.2304,longitude:121.4737-180});
+      assert.equal(first.targetLocation.kind,'land');
+      assert.equal(first.metadata.geo.resolverVersion,2);
+      assert.ok(!('nearestPlace' in first.metadata));
       assert.equal(first.metadata.generator, 'nestjs_v1');
       assert.equal(first.metadata.timezoneData.rawOffset, -10800);
       assert.match(first.result.localTime, /^\d{2}:\d{2}$/);
       assert.equal(first.result.timeline.filter(item => item.isCurrent).length, 1);
       assert.equal(first.result.timeline.length, 9);
       assert.ok(first.result.currentTitle && first.result.currentDescription && first.result.shareText);
-      assert.equal(first.videoAsset.assetSource, 'placeholder_v1');
+      assert.equal(first.videoAsset,null);
+      assert.equal(first.result.dailyStory.date,first.result.targetWorld.date);
       assert.ok(first.result.distanceKm > 19000);
     });
     await t.test('稳态读取不重复请求 GeoNames，强制刷新更新时间', async () => {
@@ -119,23 +124,48 @@ test('HTTP 登录、档案与地理服务', async t => {
       assert.ok(Date.parse(forced.body.data.metadata.lastRefreshedAt) >= Date.parse(first.metadata.lastRefreshedAt));
       assert.equal(geoCalls, count);
     });
+    await t.test('公开快照固定分享时刻且不暴露私人字段', async () => {
+      assert.equal((await call('/shares','POST')).status,401);
+      const response=await call('/shares','POST',{},tokenA);
+      assert.equal(response.status,201);
+      shared=response.body.data;
+      assert.ok(shared.capturedAt && shared.originWorld.date && shared.targetWorld.date && shared.currentState);
+      const serialized=JSON.stringify(shared);
+      for (const field of ['openid','originLocation','targetLocation','latitude','longitude','profileId','token']) {
+        assert.ok(!serialized.includes('"'+field+'"'),field);
+      }
+      assert.equal((await call('/shares/'+shared.id,'DELETE',{},tokenB)).status,404);
+      const publicResponse=await call('/shares/'+shared.id);
+      assert.deepEqual(publicResponse.body.data,shared);
+      assert.equal((await call('/shares/not-a-snapshot')).status,404);
+    });
+    await t.test('已有旧档案按真实坐标规则重新解析', async () => {
+      const store=app.get(StoreService);
+      const old=store.getActiveProfile('user-a');
+      store.updateProfile({...old,metadata:{...old.metadata,version:1,geo:{resolverVersion:1}},
+        targetLocation:{...old.targetLocation,latitude:0,longitude:0}});
+      const updated=(await call('/profiles/active','GET',undefined,tokenA)).body.data;
+      assert.deepEqual(updated.antipode,first.antipode);
+      assert.equal(updated.metadata.geo.resolverVersion,2);
+      assert.ok(!('nearestPlace' in updated.metadata));
+    });
     await t.test('用户之间无法读取或删除对方档案', async () => {
       assert.equal((await call('/profiles/active', 'GET', undefined, tokenB)).body.exists, false);
       assert.equal((await call('/profiles', 'DELETE', { profileId: first._id }, tokenB)).status, 404);
       assert.equal((await call('/profiles/active', 'GET', undefined, tokenA)).body.data._id, first._id);
     });
-    await t.test('设备位置反查与新档案创建复用目标地理缓存', async () => {
+    await t.test('设备位置反查保持起点，目标完整坐标分别查询', async () => {
       const before = geoCalls;
       const created = await call('/profiles', 'POST', payload('device', 31.230401, 121.473701, 'student'), tokenA);
       second = created.body.data;
       assert.equal(second.originLocation.cityName, 'Shanghai');
       assert.equal(second.originLocation.geoResolved.timezoneId, 'Asia/Shanghai');
-      assert.equal(second.metadata.geo.source, 'geonames_cache');
+      assert.equal(second.metadata.geo.source, 'geonames');
       assert.equal(second.antipode.latitude, -31.230401);
-      assert.equal(second.targetLocation.longitude, -58.526299);
-      assert.equal(geoCalls - before, 2);
+      assert.equal(second.targetLocation.longitude,121.473701-180);
+      assert.equal(geoCalls - before, 6);
       await call('/profiles/active', 'GET', undefined, tokenA);
-      assert.equal(geoCalls - before, 2);
+      assert.equal(geoCalls - before, 6);
     });
     await t.test('服务重启后继续复用会话、档案与地理缓存', async () => {
       await app.close(); await start();
@@ -143,6 +173,7 @@ test('HTTP 登录、档案与地理服务', async t => {
       const active = await call('/profiles/active', 'GET', undefined, tokenA);
       assert.equal(active.status, 200);
       assert.equal(active.body.data._id, second._id);
+      assert.deepEqual((await call('/shares/'+shared.id)).body.data,shared);
       const created = await call('/profiles', 'POST', payload(), tokenB);
       assert.equal(created.body.data.metadata.geo.source, 'geonames_cache');
       assert.equal(geoCalls, before);
@@ -152,14 +183,16 @@ test('HTTP 登录、档案与地理服务', async t => {
       assert.equal((await call('/profiles/active', 'GET', undefined, tokenA)).body.data._id, first._id);
       assert.equal((await call('/profiles', 'DELETE', { profileId: first._id }, tokenA)).status, 200);
       assert.equal((await call('/profiles/active', 'GET', undefined, tokenA)).body.exists, false);
+      assert.deepEqual((await call('/shares/'+shared.id)).body.data,shared);
       assert.equal((await call('/profiles/active', 'GET', undefined, tokenB)).body.exists, true);
     });
     await t.test('海上对蹠点返回海洋信息与其他形象的日程', async () => {
       oceanMode = true;
       const created = await call('/profiles', 'POST', payload('manual', 40, 110, 'traveler'), tokenA);
-      assert.equal(created.body.data.targetLocation.landingMode, 'deep_ocean');
+      assert.equal(created.body.data.targetLocation.kind,'ocean');
+      assert.equal(created.body.data.result.scene.habitat,'boat_cabin');
       assert.equal(created.body.data.metadata.ocean.name, 'South Pacific Ocean');
-      assert.ok(created.body.data.result.timeline.some(item => item.title === '探索远方'));
+      assert.ok(created.body.data.result.timeline.some(item => item.title === '观察海面' || item.title === '整理旅途手记'));
       oceanMode = false;
     });
     await t.test('GeoNames 故障时使用坐标结果，恢复后重新解析', async () => {

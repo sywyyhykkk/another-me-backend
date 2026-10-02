@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { VirtualProfile } from './types';
+import type { ShareSnapshot, VirtualProfile } from './types';
 
 @Injectable()
 export class StoreService implements OnModuleDestroy {
@@ -24,6 +24,7 @@ export class StoreService implements OnModuleDestroy {
       );
       CREATE INDEX IF NOT EXISTS profiles_owner ON profiles(openid, status, updated_at);
       CREATE UNIQUE INDEX IF NOT EXISTS profiles_active ON profiles(openid) WHERE status = 'active';
+      CREATE TABLE IF NOT EXISTS share_snapshots (id TEXT PRIMARY KEY, document TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS geo_cache (id TEXT PRIMARY KEY, document TEXT NOT NULL);
     `);
   }
@@ -75,6 +76,17 @@ export class StoreService implements OnModuleDestroy {
       }
     });
     return deleted;
+  }
+
+  createShare(content: Omit<ShareSnapshot, 'id'>): ShareSnapshot {
+    const snapshot = { id: randomUUID(), ...content };
+    this.db.prepare('INSERT INTO share_snapshots VALUES (?, ?)').run(snapshot.id, JSON.stringify(snapshot));
+    return snapshot;
+  }
+
+  getShare(id: string): ShareSnapshot | null {
+    const row = this.db.prepare('SELECT document FROM share_snapshots WHERE id = ?').get(id);
+    return row ? JSON.parse(String(row.document)) : null;
   }
 
   getGeoCache<T>(id: string): T | null {

@@ -1,7 +1,7 @@
 export type LocationMode = 'device' | 'manual'
 export type AvatarRole = 'office_worker' | 'student' | 'freelancer' | 'traveler'
 export type TargetMode = 'antipode' | 'custom_location'
-export type LandingMode = 'exact_land' | 'near_land' | 'deep_ocean'
+export type TargetKind = 'land' | 'ocean' | 'unknown'
 
 export interface OriginGeoResolved {
 	source: 'device_reverse'
@@ -39,16 +39,12 @@ export interface SelectedAvatar {
 	emoji?: string
 }
 
-export interface TargetLocation {
-	latitude: number
-	longitude: number
-	locationLabel: string
-	countryName: string
-	regionName: string
-	nearestLivingArea: string
-	landingMode: LandingMode
-	usesProxyLivingArea: boolean
-	proxyReason?: string
+export interface TargetLocation extends AntipodeCoordinates {
+  locationLabel: string
+  countryName: string
+  regionName: string
+  kind: TargetKind
+  oceanName?: string
 }
 
 export interface ProfileTimelineItem {
@@ -56,6 +52,8 @@ export interface ProfileTimelineItem {
 	title: string
 	state: string
 	isCurrent?: boolean
+	description?: string
+	mood?: string
 }
 
 export interface VideoAsset {
@@ -68,6 +66,7 @@ export interface VideoAsset {
 
 export interface GeoTimezoneData {
 	timezoneId?: string
+	utcOffsetSeconds?: number
 	time?: string
 	countryCode?: string
 	countryName?: string
@@ -77,7 +76,34 @@ export interface GeoTimezoneData {
 	sunset?: string
 }
 
+export interface WorldClock {
+  place: string
+  date: string
+  time: string
+  relativeDay: string
+  hour: number
+  localMinutes: number
+  weekday: number
+  estimated: boolean
+  utcOffsetSeconds: number
+  isDay: boolean
+  dayNight: string
+  dayNightEstimated: boolean
+  timeLabel: string
+}
+export interface Scene {
+  habitat: 'boat_cabin' | 'land_home' | 'unknown_home'
+  title: string
+  description: string
+  isDay: boolean
+}
 export interface VirtualProfileResult {
+  originWorld: WorldClock
+  targetWorld: WorldClock
+  dailyStory: { date: string; title: string; text: string }
+  nextActivity: ProfileTimelineItem
+  scene: Scene
+  connectionText: string
 	localTime: string
 	localDateLabel: string
 	dayType: 'weekday' | 'weekend' | 'holiday'
@@ -117,9 +143,9 @@ export interface VirtualProfile {
 		countryCode?: string
 		videoAssetGroupId?: string
 		geo?: Record<string, unknown> | null
-		nearestPlace?: Record<string, unknown> | null
 		ocean?: Record<string, unknown> | null
 		timezoneData?: GeoTimezoneData | null
+		originTimezoneData?: GeoTimezoneData | null
 		activity?: Record<string, unknown> | null
 		asset?: Record<string, unknown> | null
 	}
@@ -159,4 +185,21 @@ export interface StoredUserLocation {
 	longitude: number
 	accuracy?: number
 	createdAt: number
+}
+
+// 唯一公开的分享内容；不包含用户身份、档案 ID 或两端的坐标。
+export interface ShareSnapshot {
+  currentState: string
+  id: string
+  capturedAt: string
+  avatar: { name: string; emoji: string; role: AvatarRole }
+  originWorld: WorldClock
+  targetWorld: WorldClock
+  currentTitle: string
+  currentDescription: string
+  todayMood: string
+  scene: Scene
+  dailyStory: { date: string; title: string; text: string }
+  connectionText: string
+  shareText: string
 }

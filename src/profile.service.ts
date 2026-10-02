@@ -1,99 +1,94 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { StoreService } from './store.service';
-import { GeoService, validateOrigin } from './geo.service';
+import { GeoService, validateOrigin, antipodeOf } from './geo.service';
 import type { GeoData } from './geo.service';
-import type { CreateVirtualProfilePayload, DeleteVirtualProfilePayload, OriginLocation, SelectedAvatar, VirtualProfile } from './types';
-import { buildActivityResult } from './domain/activity';
-import { resolveVideoAsset } from './domain/assets';
-import { getCurrentActivitySlot, buildActivitySlotKey } from './domain/schedule';
+import type { CreateVirtualProfilePayload, DeleteVirtualProfilePayload, GeoTimezoneData, OriginLocation, SelectedAvatar, ShareSnapshot, VirtualProfile } from './types';
+import { clockAt, profileMoment } from './domain/world';
 
 @Injectable()
 export class ProfileService {
   constructor(private readonly store: StoreService, private readonly geo: GeoService) {}
-
   async create(openid: string, payload: CreateVirtualProfilePayload) {
     const avatar = payload?.selectedAvatar;
-    if (!validateOrigin(payload?.originLocation) || !avatar
-      || typeof avatar.id !== 'string' || !avatar.id || avatar.id.length > 100
-      || typeof avatar.name !== 'string' || !avatar.name.trim() || avatar.name.length > 100
-      || !['office_worker', 'student', 'freelancer', 'traveler'].includes(avatar.role)
+    if (!validateOrigin(payload?.originLocation) || !avatar || typeof avatar.id !== 'string' || !avatar.id || avatar.id.length>100
+      || typeof avatar.name !== 'string' || !avatar.name.trim() || avatar.name.length>100
+      || !['office_worker','student','freelancer','traveler'].includes(avatar.role)
       || (payload.targetMode && payload.targetMode !== 'antipode')
-      || (payload.profileName !== undefined && (typeof payload.profileName !== 'string' || payload.profileName.length > 200))) {
+      || (payload.profileName !== undefined && (typeof payload.profileName !== 'string' || payload.profileName.length>200))) {
       throw new BadRequestException('Invalid profile payload');
     }
-    // 只保存业务字段，用户身份始终取自已验证的登录会话。
-    let origin: OriginLocation = { mode: payload.originLocation.mode, cityName: payload.originLocation.cityName,
-      countryName: payload.originLocation.countryName, latitude: payload.originLocation.latitude,
-      longitude: payload.originLocation.longitude };
-    const selectedAvatar: SelectedAvatar = { id: avatar.id, role: avatar.role, name: avatar.name,
-      description: typeof avatar.description === 'string' ? avatar.description : '',
-      emoji: typeof avatar.emoji === 'string' ? avatar.emoji : '💼' };
-    const resolved = await this.geo.resolveCombined(origin, origin.mode === 'device');
+    let origin: OriginLocation = {mode:payload.originLocation.mode,cityName:payload.originLocation.cityName,
+      countryName:payload.originLocation.countryName,latitude:payload.originLocation.latitude,longitude:payload.originLocation.longitude};
+    const selectedAvatar: SelectedAvatar = {id:avatar.id,role:avatar.role,name:avatar.name,
+      description:typeof avatar.description === 'string' ? avatar.description : '',emoji:typeof avatar.emoji === 'string' ? avatar.emoji : '💼'};
+    const resolved = await this.geo.resolveCombined(origin,origin.mode === 'device');
     if (resolved.origin) {
-      const { nearestPlace: place, timezone } = resolved.origin;
-      origin = { ...origin, cityName: resolved.origin.cityName, countryName: resolved.origin.countryName,
-        geoResolved: { source: 'device_reverse', cityName: resolved.origin.cityName, countryName: resolved.origin.countryName,
-          countryCode: place?.countryCode || timezone?.countryCode, timezoneId: timezone?.timezoneId,
-          geonameId: place?.geonameId, adminName1: place?.adminName1, lat: place?.lat, lng: place?.lng,
-          distanceKm: place?.distanceKm } };
+      origin = {...origin,cityName:resolved.origin.cityName,countryName:resolved.origin.countryName,
+        geoResolved:{source:'device_reverse',cityName:resolved.origin.cityName,countryName:resolved.origin.countryName,
+          timezoneId:resolved.origin.timezone?.timezoneId,countryCode:resolved.origin.timezone?.countryCode}};
     }
     const now = new Date().toISOString();
-    const profile = this.store.createProfile({ openid,
-      profileName: payload.profileName || `${selectedAvatar.name} · ${origin.cityName}的另一端`,
-      profileStatus: 'active', selectedAvatar, creationSource: 'onboarding', originLocation: origin,
-      targetMode: 'antipode', ...this.content(selectedAvatar, resolved.target), createdAt: now, updatedAt: now });
-    return { success: true, exists: true, data: profile };
+    const profile = this.store.createProfile({openid,profileName:payload.profileName || `${selectedAvatar.name} · ${origin.cityName}的另一端`,
+      profileStatus:'active',selectedAvatar,creationSource:'onboarding',originLocation:origin,targetMode:'antipode',
+      ...this.content(selectedAvatar,origin,resolved.target,resolved.originTimezone),createdAt:now,updatedAt:now});
+    return {success:true,exists:true,data:profile};
   }
-
-  async getActive(openid: string, forceRefresh: boolean) {
+  async getActive(openid: string, _forceRefresh: boolean) {
     const profile = this.store.getActiveProfile(openid);
-    if (!profile) return { success: true, exists: false, data: null };
+    if (!profile) return {success:true,exists:false,data:null};
     const meta = profile.metadata;
-    let geo: GeoData = { antipode: profile.antipode!, targetLocation: profile.targetLocation,
-      distanceKm: profile.result.distanceKm, nearestPlace: meta.nearestPlace as GeoData['nearestPlace'],
-      ocean: meta.ocean as GeoData['ocean'], timezone: meta.timezoneData || null,
-      geoMeta: meta.geo as unknown as GeoData['geoMeta'] };
-    let geoChanged = false;
-    if (!geo.timezone?.timezoneId || geo.geoMeta.source === 'fallback') {
-      try { geo = await this.geo.resolveTarget(profile.originLocation); geoChanged = true; }
-      catch { /* 保留已有坐标结果，仍可按当地日程刷新。 */ }
+    const expected = antipodeOf(profile.originLocation);
+    let geo: GeoData;
+    if (meta.geo?.resolverVersion !== 2 || !profile.targetLocation.kind
+      || profile.targetLocation.latitude !== expected.latitude || profile.targetLocation.longitude !== expected.longitude
+      || meta.geo?.source === 'fallback' || !meta.geo?.resolvedAt || Date.now()-Date.parse(String(meta.geo.resolvedAt))>=86400000) {
+      geo = await this.geo.resolveTarget(profile.originLocation);
+    } else {
+      geo = {antipode:expected,targetLocation:profile.targetLocation,distanceKm:Math.round(Math.PI*6371),
+        ocean:meta.ocean as GeoData['ocean'],timezone:meta.timezoneData || null,geoMeta:meta.geo as unknown as GeoData['geoMeta']};
     }
-    const slotKey = this.slotKey(profile.selectedAvatar, geo);
-    if (forceRefresh || geoChanged || profile.metadata.activitySlotKey !== slotKey) {
-      const updated = { ...profile, ...this.content(profile.selectedAvatar, geo), updatedAt: new Date().toISOString() };
-      // 地理查询期间用户可能创建或删除档案，避免覆盖新的活动档案。
-      if (this.store.getActiveProfile(openid)?._id === profile._id) {
-        this.store.updateProfile(updated);
-        return { success: true, exists: true, data: updated };
-      }
-      const current = this.store.getActiveProfile(openid);
-      return { success: true, exists: Boolean(current), data: current };
+    const originTimezone = meta.originTimezoneData || await this.geo.originTimezone(profile.originLocation);
+    const updated = {...profile,...this.content(profile.selectedAvatar,profile.originLocation,geo,originTimezone),updatedAt:new Date().toISOString()};
+    if (this.store.getActiveProfile(openid)?._id !== profile._id) {
+      const current=this.store.getActiveProfile(openid);
+      return {success:true,exists:Boolean(current),data:current};
     }
-    return { success: true, exists: true, data: profile };
+    this.store.updateProfile(updated);
+    return {success:true,exists:true,data:updated};
   }
-
   delete(openid: string, payload: DeleteVirtualProfilePayload) {
     const profileId = payload?.deleteActive ? this.store.getActiveProfile(openid)?._id : payload?.profileId;
     if (!profileId || typeof profileId !== 'string') throw new BadRequestException('Invalid profile payload');
-    if (!this.store.deleteProfile(openid, profileId)) throw new NotFoundException('Profile not found');
-    return { success: true, data: null };
+    if (!this.store.deleteProfile(openid,profileId)) throw new NotFoundException('Profile not found');
+    return {success:true,data:null};
   }
-
-  private slotKey(avatar: SelectedAvatar, geo: GeoData): string {
-    const slot = getCurrentActivitySlot(avatar.role, geo.timezone, new Date(), geo.antipode.longitude);
-    return slot ? buildActivitySlotKey(avatar.role, slot.index, slot.localDateKey) : '';
+  async share(openid: string) {
+    const response = await this.getActive(openid,true);
+    if (!response.data) throw new NotFoundException('Profile not found');
+    const profile = response.data;
+    const capturedAt = new Date().toISOString();
+    const result = profileMoment(profile,new Date(capturedAt));
+    // 白名单投影，公开接口永远不回传私人档案或坐标。
+    const snapshot: Omit<ShareSnapshot,'id'> = {capturedAt,
+      avatar:{name:profile.selectedAvatar.name,emoji:profile.selectedAvatar.emoji || '🌏',role:profile.selectedAvatar.role},
+      originWorld:result.originWorld,targetWorld:result.targetWorld,currentTitle:result.currentTitle,currentState:result.currentState,
+      currentDescription:result.currentDescription,todayMood:result.todayMood,scene:result.scene,
+      dailyStory:result.dailyStory,connectionText:result.connectionText,shareText:result.shareText};
+    return {success:true,data:this.store.createShare(snapshot)};
   }
-
-  private content(avatar: SelectedAvatar, geo: GeoData): Pick<VirtualProfile, 'antipode' | 'targetLocation' | 'result' | 'videoAsset' | 'metadata'> {
-    const result = buildActivityResult({ selectedAvatar: avatar, distanceKm: geo.distanceKm,
-      geoMeta: geo.geoMeta, timezone: geo.timezone, antipode: geo.antipode })!;
-    const videoAsset = resolveVideoAsset({ avatarRole: avatar.role, currentState: result.currentState });
-    return { antipode: geo.antipode, targetLocation: geo.targetLocation, result, videoAsset,
-      metadata: { version: 1, generator: 'nestjs_v1', activitySlotKey: this.slotKey(avatar, geo),
-        lastRefreshedAt: new Date().toISOString(), geo: { ...geo.geoMeta },
-        nearestPlace: geo.nearestPlace ? { ...geo.nearestPlace } : null, ocean: geo.ocean,
-        timezoneId: geo.timezone?.timezoneId, countryCode: geo.timezone?.countryCode,
-        timezoneData: geo.timezone, activity: { ...result.activityMeta },
-        asset: videoAsset ? { assetKey: videoAsset.assetKey, assetSource: videoAsset.assetSource } : null } };
+  getShare(id: string) {
+    if (!/^[0-9a-f-]{36}$/.test(id)) throw new NotFoundException('Snapshot not found');
+    const snapshot = this.store.getShare(id);
+    if (!snapshot) throw new NotFoundException('Snapshot not found');
+    return {success:true,data:snapshot};
+  }
+  private content(avatar: SelectedAvatar, origin: OriginLocation, geo: GeoData, originTimezone: GeoTimezoneData|null): Pick<VirtualProfile,'antipode'|'targetLocation'|'result'|'videoAsset'|'metadata'> {
+    if (geo.timezone?.timezoneId) geo.timezone={...geo.timezone,utcOffsetSeconds:clockAt(geo.timezone,new Date(),geo.antipode.longitude).utcOffsetSeconds};
+    if (originTimezone?.timezoneId) originTimezone={...originTimezone,utcOffsetSeconds:clockAt(originTimezone,new Date(),origin.longitude).utcOffsetSeconds};
+    const metadata: VirtualProfile['metadata'] = {version:2,generator:'nestjs_v1',lastRefreshedAt:new Date().toISOString(),
+      geo:{...geo.geoMeta},ocean:geo.ocean,timezoneId:geo.timezone?.timezoneId,countryCode:geo.timezone?.countryCode,
+      timezoneData:geo.timezone,originTimezoneData:originTimezone};
+    const result = profileMoment({selectedAvatar:avatar,originLocation:origin,targetLocation:geo.targetLocation,metadata,result:{distanceKm:geo.distanceKm}});
+    return {antipode:geo.antipode,targetLocation:geo.targetLocation,result,videoAsset:null,metadata};
   }
 }

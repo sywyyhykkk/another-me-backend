@@ -1,7 +1,7 @@
 # Another Me Backend
 
 「对面的我」微信小程序的 NestJS 后端，提供微信登录、档案创建/读取/刷新/删除、
-GeoNames 起点反查与对蹠点查询、地理缓存、当地日程、活动文案和占位视频数据。
+GeoNames 起点反查与真实对跖点查询、每日生活规则、双世界时钟和公开分享快照。
 
 使用 Node.js 自带 SQLite 保存会话、档案和地理缓存，无须单独安装数据库。
 
@@ -45,9 +45,11 @@ npm start
 | GET | `/profiles/active` | 当前用户的活动档案；`?forceRefresh=true` 强制刷新活动 |
 | POST | `/profiles` | 创建档案，原有活动档案归档 |
 | DELETE | `/profiles` | `{ "deleteActive": true }` 或 `{ "profileId": "..." }`；删除活动档案后恢复最近一份档案 |
+| POST | `/shares` | 为当前用户档案创建不可变的公开快照 |
+| GET | `/shares/:id` | 无须登录，只返回快照展示字段 |
 | POST | `/geo/origin` | `{ "latitude": 31.23, "longitude": 121.47 }`，反查城市和时区 |
 
-除健康检查和登录外，接口均需登录；用户身份只取自会话。创建请求示例：
+除健康检查、登录和公开快照读取外，接口均需登录；用户身份只取自会话。创建请求示例：
 
 ```json
 {
@@ -64,7 +66,7 @@ npm start
 ```
 
 `mode` 支持 `manual` 和 `device`；形象角色支持 `office_worker`、`student`、
-`freelancer`、`traveler`。日程在 `src/domain/schedule.js` 的 `TIMELINE_TEMPLATES` 中修改。
+`freelancer`、`traveler`。每日规则在 `src/domain/world.js` 中修改，同时同步前端 `utils/world.js`。
 地理服务临时不可用时返回坐标结果，并按经度估算当地时间；后续读取会重新尝试地理查询。
 
 ## 验证
@@ -77,3 +79,22 @@ npm test
 服务重启与数据保留。微信和 GeoNames 响应由测试替身提供，测试无需真实密钥。
 
 服务器准备好后使用上述启动方式部署，并为小程序配置 HTTPS 域名。
+
+## 当前服务器
+
+产品依据：`/Users/junyu/Desktop/another me 需求文档.md`。
+
+后端已部署到 `https://another-me.m4n9o.com/api`。使用 `ssh another-me-server` 登录，
+代码和数据位于 `/opt/another-me`，环境文件权限为 600。服务操作：
+
+```bash
+sudo systemctl restart another-me
+sudo systemctl status another-me
+sudo journalctl -u another-me -n 50 --no-pager
+```
+
+更新时同步 `dist/`、`src/`、`package.json` 和 lock 文件，执行 `npm ci --omit=dev`
+并重启服务，保留 `.env` 和 `data/`。部署配置模板位于 `deploy/`，HTTPS 证书自动续期。
+腾讯云已放行公网 TCP 443，公网 HTTPS 健康检查返回 HTTP 200。
+正式小程序构建已通过该 HTTPS 地址完成微信重新登录和已有档案读取。
+目标查询不使用起点的城市反查结果，也不使用附近城市坐标；旧档案读取会重新解析。

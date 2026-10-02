@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Post, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthService, SessionGuard } from './auth.service';
 import type { SessionRequest } from './auth.service';
 import { ProfileService } from './profile.service';
@@ -33,6 +33,13 @@ export class AppController {
   delete(@Req() req: SessionRequest, @Body() body: DeleteVirtualProfilePayload) {
     return this.profiles.delete(req.openid, body);
   }
+
+  @UseGuards(SessionGuard)
+  @Post('shares')
+  share(@Req() req: SessionRequest) { return this.profiles.share(req.openid); }
+
+  @Get('shares/:id')
+  getShare(@Param('id') id: string) { return this.profiles.getShare(id); }
 
   @UseGuards(SessionGuard)
   @Post('geo/origin')
