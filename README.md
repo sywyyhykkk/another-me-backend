@@ -21,6 +21,9 @@ cp .env.example .env
 | `WECHAT_APP_ID` | 微信小程序 AppID，与前端一致 |
 | `WECHAT_APP_SECRET` | 小程序 AppSecret，必填 |
 | `GEONAMES_USERNAME` | 已开启免费 Web Services 的 GeoNames 用户名，地理功能必填 |
+| `QWEATHER_API_HOST` | 和风天气控制台分配的 API Host，不带协议 |
+| `QWEATHER_DEVELOPER_ID` / `QWEATHER_PROJECT_ID` / `QWEATHER_KEY_ID` | JWT 的开发者 ID、项目 ID、凭据 ID |
+| `QWEATHER_PRIVATE_KEY_PATH` | Ed25519 私钥文件路径，仅后端读取；文件权限设为 600 |
 | `PORT` / `HOST` | 默认 `3000` / `0.0.0.0` |
 | `DATABASE_PATH` | 默认 `./data/another-me.sqlite` |
 
@@ -31,6 +34,14 @@ npm start
 
 修改源码后重新 build 并启动。`.env` 和 `data/` 已排除提交；重启时使用同一
 `DATABASE_PATH` 即可继续读取会话、档案和缓存。
+
+天气使用和风全球经纬度接口 `/weather/v1/current/{latitude}/{longitude}` 和
+`/weather/v1/daily/{latitude}/{longitude}`，不以附近城市替代对跖点。
+起点实况缓存到当地下一整点，对跖点当日预报缓存到当地次日零点；按接口支持的
+两位小数经纬度共享 SQLite 缓存，合并并发请求，刷新页面不会绕过缓存。
+服务重启继续使用缓存；失败退避五分钟，当天旧数据标记为最近天气，跨日不冒充新预报。
+缺少天气配置或上游失败不影响档案、时钟和虚拟日程，页面显示天气暂不可用。
+公开分享只保存天气展示字段，不暴露坐标或凭据，读取快照不会请求和风。
 
 ## 接口
 

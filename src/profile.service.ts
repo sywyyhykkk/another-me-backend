@@ -4,10 +4,11 @@ import { GeoService, validateOrigin, antipodeOf } from './geo.service';
 import type { GeoData } from './geo.service';
 import type { CreateVirtualProfilePayload, DeleteVirtualProfilePayload, GeoTimezoneData, OriginLocation, SelectedAvatar, ShareSnapshot, VirtualProfile } from './types';
 import { clockAt, profileMoment } from './domain/world';
+import { WeatherService } from './weather.service';
 
 @Injectable()
 export class ProfileService {
-  constructor(private readonly store: StoreService, private readonly geo: GeoService) {}
+  constructor(private readonly store: StoreService, private readonly geo: GeoService, private readonly weather: WeatherService) {}
   async create(openid: string, payload: CreateVirtualProfilePayload) {
     const avatar = payload?.selectedAvatar;
     if (!validateOrigin(payload?.originLocation) || !avatar || typeof avatar.id !== 'string' || !avatar.id || avatar.id.length>100
@@ -30,7 +31,7 @@ export class ProfileService {
     const now = new Date().toISOString();
     const profile = this.store.createProfile({openid,profileName:payload.profileName || `${selectedAvatar.name} · ${origin.cityName}的另一端`,
       profileStatus:'active',selectedAvatar,creationSource:'onboarding',originLocation:origin,targetMode:'antipode',
-      ...this.content(selectedAvatar,origin,resolved.target,resolved.originTimezone),createdAt:now,updatedAt:now});
+      ...await this.content(selectedAvatar,origin,resolved.target,resolved.originTimezone),createdAt:now,updatedAt:now});
     return {success:true,exists:true,data:profile};
   }
   async getActive(openid: string, _forceRefresh: boolean) {
@@ -48,7 +49,7 @@ export class ProfileService {
         ocean:meta.ocean as GeoData['ocean'],timezone:meta.timezoneData || null,geoMeta:meta.geo as unknown as GeoData['geoMeta']};
     }
     const originTimezone = meta.originTimezoneData || await this.geo.originTimezone(profile.originLocation);
-    const updated = {...profile,...this.content(profile.selectedAvatar,profile.originLocation,geo,originTimezone),updatedAt:new Date().toISOString()};
+    const updated = {...profile,...await this.content(profile.selectedAvatar,profile.originLocation,geo,originTimezone),updatedAt:new Date().toISOString()};
     if (this.store.getActiveProfile(openid)?._id !== profile._id) {
       const current=this.store.getActiveProfile(openid);
       return {success:true,exists:Boolean(current),data:current};
@@ -82,13 +83,16 @@ export class ProfileService {
     if (!snapshot) throw new NotFoundException('Snapshot not found');
     return {success:true,data:snapshot};
   }
-  private content(avatar: SelectedAvatar, origin: OriginLocation, geo: GeoData, originTimezone: GeoTimezoneData|null): Pick<VirtualProfile,'antipode'|'targetLocation'|'result'|'videoAsset'|'metadata'> {
+  private async content(avatar: SelectedAvatar, origin: OriginLocation, geo: GeoData, originTimezone: GeoTimezoneData|null): Promise<Pick<VirtualProfile,'antipode'|'targetLocation'|'result'|'videoAsset'|'metadata'>> {
     if (geo.timezone?.timezoneId) geo.timezone={...geo.timezone,utcOffsetSeconds:clockAt(geo.timezone,new Date(),geo.antipode.longitude).utcOffsetSeconds};
     if (originTimezone?.timezoneId) originTimezone={...originTimezone,utcOffsetSeconds:clockAt(originTimezone,new Date(),origin.longitude).utcOffsetSeconds};
     const metadata: VirtualProfile['metadata'] = {version:2,generator:'nestjs_v1',lastRefreshedAt:new Date().toISOString(),
       geo:{...geo.geoMeta},ocean:geo.ocean,timezoneId:geo.timezone?.timezoneId,countryCode:geo.timezone?.countryCode,
       timezoneData:geo.timezone,originTimezoneData:originTimezone};
     const result = profileMoment({selectedAvatar:avatar,originLocation:origin,targetLocation:geo.targetLocation,metadata,result:{distanceKm:geo.distanceKm}});
+    metadata.weather = await this.weather.pair(origin, geo.targetLocation, result.originWorld, result.targetWorld);
+    result.originWorld.weather = metadata.weather.origin || undefined;
+    result.targetWorld.weather = metadata.weather.target || undefined;
     return {antipode:geo.antipode,targetLocation:geo.targetLocation,result,videoAsset:null,metadata};
   }
 }

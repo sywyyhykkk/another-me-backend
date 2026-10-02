@@ -76,6 +76,20 @@ export interface GeoTimezoneData {
 	sunset?: string
 }
 
+export interface WorldWeather {
+  period: 'hourly' | 'daily'
+  source: 'qweather'
+  date: string
+  code: string
+  text: string
+  temperature?: number
+  temperatureMin?: number
+  temperatureMax?: number
+  fetchedAt: string
+  expiresAt: string
+  stale?: boolean
+  attributions: string[]
+}
 export interface WorldClock {
   place: string
   date: string
@@ -90,6 +104,7 @@ export interface WorldClock {
   dayNight: string
   dayNightEstimated: boolean
   timeLabel: string
+  weather?: WorldWeather
 }
 export interface Scene {
   habitat: 'boat_cabin' | 'land_home' | 'unknown_home'
@@ -146,6 +161,7 @@ export interface VirtualProfile {
 		ocean?: Record<string, unknown> | null
 		timezoneData?: GeoTimezoneData | null
 		originTimezoneData?: GeoTimezoneData | null
+		weather?: { origin: WorldWeather | null; target: WorldWeather | null }
 		activity?: Record<string, unknown> | null
 		asset?: Record<string, unknown> | null
 	}

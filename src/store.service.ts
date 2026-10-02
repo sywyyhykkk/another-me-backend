@@ -26,6 +26,7 @@ export class StoreService implements OnModuleDestroy {
       CREATE UNIQUE INDEX IF NOT EXISTS profiles_active ON profiles(openid) WHERE status = 'active';
       CREATE TABLE IF NOT EXISTS share_snapshots (id TEXT PRIMARY KEY, document TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS geo_cache (id TEXT PRIMARY KEY, document TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS weather_cache (id TEXT PRIMARY KEY, document TEXT NOT NULL);
     `);
   }
 
@@ -96,6 +97,15 @@ export class StoreService implements OnModuleDestroy {
 
   saveGeoCache(id: string, data: unknown) {
     this.db.prepare('INSERT OR REPLACE INTO geo_cache VALUES (?, ?)').run(id, JSON.stringify(data));
+  }
+
+  getWeatherCache<T>(id: string): T | null {
+    const row = this.db.prepare('SELECT document FROM weather_cache WHERE id = ?').get(id);
+    return row ? JSON.parse(String(row.document)) : null;
+  }
+
+  saveWeatherCache(id: string, data: unknown) {
+    this.db.prepare('INSERT OR REPLACE INTO weather_cache VALUES (?, ?)').run(id, JSON.stringify(data));
   }
 
   private transaction(action: () => void) {

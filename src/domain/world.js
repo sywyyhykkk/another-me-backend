@@ -131,6 +131,9 @@ export function profileMoment(profile, at = new Date()) {
   const ocean = profile.targetLocation.kind === 'ocean';
   const origin = worldAt(profile.originLocation.cityName, profile.originLocation, profile.metadata.originTimezoneData, at);
   const target = worldAt(profile.targetLocation.locationLabel, profile.targetLocation, profile.metadata.timezoneData, at, origin.date, ocean);
+  const weather = profile.metadata.weather;
+  if (weather?.origin?.date === origin.date) origin.weather = weather.origin;
+  if (weather?.target?.date === target.date) target.weather = weather.target;
   const plan = dailyPlan(profile.selectedAvatar.role, profile.targetLocation, target.date, ocean);
   const index = currentIndex(plan.timeline, target.localMinutes), item = plan.timeline[index];
   const timeline = plan.timeline.map((entry, i) => ({ ...entry, isCurrent: i === index }));
