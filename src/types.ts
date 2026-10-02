@@ -2,6 +2,26 @@ export type LocationMode = 'device' | 'manual'
 export type AvatarRole = 'office_worker' | 'student' | 'freelancer' | 'traveler'
 export type TargetMode = 'antipode' | 'custom_location'
 export type TargetKind = 'land' | 'ocean' | 'unknown'
+export type CharacterGender = 'male' | 'female' | 'unspecified'
+export type ContinentCode = 'AS' | 'EU' | 'AF' | 'NA' | 'SA' | 'OC' | 'AN'
+
+export interface CharacterIdentity {
+  name: string
+  gender: CharacterGender
+  continent: ContinentCode
+}
+
+export interface SuggestCharacterPayload {
+  originLocation: OriginLocation
+  gender: CharacterGender
+  excludeName?: string
+}
+
+export interface CharacterSuggestion extends CharacterIdentity {
+  continentLabel: string
+  locationLabel: string
+  targetKind: TargetKind
+}
 
 export interface OriginGeoResolved {
 	source: 'device_reverse'
@@ -45,6 +65,7 @@ export interface TargetLocation extends AntipodeCoordinates {
   regionName: string
   kind: TargetKind
   oceanName?: string
+  countryCode?: string
 }
 
 export interface ProfileTimelineItem {
@@ -142,6 +163,7 @@ export interface VirtualProfile {
 	profileName: string
 	profileStatus: 'active' | 'archived'
 	selectedAvatar: SelectedAvatar
+  character?: CharacterIdentity
 	creationSource: 'onboarding' | 'manual' | 'future_custom'
 	originLocation: OriginLocation
 	antipode?: AntipodeCoordinates
@@ -179,6 +201,7 @@ export interface ApiResponse<T> {
 export interface CreateVirtualProfilePayload {
 	originLocation: OriginLocation
 	selectedAvatar: SelectedAvatar
+  character: CharacterIdentity
 	targetMode?: TargetMode
 	profileName?: string
 }
@@ -209,6 +232,7 @@ export interface ShareSnapshot {
   id: string
   capturedAt: string
   avatar: { name: string; emoji: string; role: AvatarRole }
+  character?: Pick<CharacterIdentity, 'name' | 'gender'>
   originWorld: WorldClock
   targetWorld: WorldClock
   currentTitle: string

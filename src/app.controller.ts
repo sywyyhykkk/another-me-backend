@@ -3,7 +3,7 @@ import { AuthService, SessionGuard } from './auth.service';
 import type { SessionRequest } from './auth.service';
 import { ProfileService } from './profile.service';
 import { GeoService } from './geo.service';
-import type { CreateVirtualProfilePayload, DeleteVirtualProfilePayload } from './types';
+import type { CreateVirtualProfilePayload, DeleteVirtualProfilePayload, SuggestCharacterPayload } from './types';
 
 @Controller()
 export class AppController {
@@ -21,6 +21,10 @@ export class AppController {
   getActive(@Req() req: SessionRequest, @Query('forceRefresh') forceRefresh?: string) {
     return this.profiles.getActive(req.openid, forceRefresh === 'true');
   }
+
+  @UseGuards(SessionGuard)
+  @Post('characters/suggest')
+  suggestCharacter(@Body() body: SuggestCharacterPayload) { return this.profiles.suggestCharacter(body); }
 
   @UseGuards(SessionGuard)
   @Post('profiles')

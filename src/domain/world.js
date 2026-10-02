@@ -74,7 +74,7 @@ const STORIES = {
   land: {
     office_worker: [['一张小便签', '想在便签上记下一个小目标', '在便签旁完成了第一件待办', '把写满的便签夹进本子'], ['换一本书', '想翻开搁置很久的书', '读到一句喜欢的话', '给那句话做了一个记号'], ['一杯热茶', '准备泡一杯热茶', '端着茶杯整理思路', '洗好茶杯，留给明天']],
     student: [['新书签', '想给正在读的书做个书签', '在书签上写下一句话', '用新书签标好今天读到的一页'], ['一页涂鸦', '准备在笔记边角画点什么', '画下窗外天空的颜色', '收好这张小画'], ['一道难题', '打算把昨天的难题再想一遍', '在纸上找到一点新思路', '记下今天想明白的部分']],
-    freelancer: [['新的开头', '想为一段故事写个开头', '写下了第一段文字', '给明天的续写留下一句话'], ['慢炖小锅', '打算为自己做一锅热食', '试着调整小锅里的味道', '把这次的做法记在纸上'], ['灵感本', '想整理几页旧灵感', '挑出一个值得继续的想法', '给它留出新的一页']],
+    freelancer: [['新的开头', '想为一段故事写个开头', '写下了第一段文字', '给明天的续写留下一句话'], ['慢炖小锅', '打算为自己做一锅热食', '试着调整小锅里的味道', '把这次的做法记在纸上'], ['灵感本', '想整理几页旧灵感', '挑出一个值得继续的想法', '为这个想法留出新的一页']],
     traveler: [['天空色卡', '打算记住今天的天空颜色', '在手记里涂下一块颜色', '为色卡写下今天的日期'], ['一段观察', '想认真观察身边一个细节', '把观察到的细节写进本子', '重读记录，补上一句感受'], ['一页手绘', '准备画下眼前的风景', '给草图补上几条线', '给完成的小画签上日期']]
   },
   ocean: {
@@ -85,7 +85,8 @@ const STORIES = {
   }
 };
 
-export function dailyPlan(role, point, date, ocean = false) {
+export function dailyPlan(role, point, date, ocean = false, personName = '另一个我') {
+  const name = typeof personName === 'string' && personName.trim() ? personName.trim() : '另一个我';
   const dateNumber = Math.floor(Date.parse(date) / 86400000);
   const seed = Math.abs(dateNumber + ROLES.indexOf(role)*7 + Math.round(point.latitude*10) + Math.round(point.longitude*10));
   const weekend = [0,6].includes(new Date(date + 'T12:00:00Z').getUTCDay());
@@ -102,10 +103,10 @@ export function dailyPlan(role, point, date, ocean = false) {
     if (ocean && role === 'office_worker' && state === 'working') title = index === 3 ? '船舱办公' : '船舱继续办公';
     if (ocean && role === 'traveler' && state === 'traveling') title = index === 3 ? '观察海面' : '记录海上见闻';
     const phase = minutes < 750 ? 1 : minutes < 1200 ? 2 : 3;
-    const echo = state === 'sleeping' ? (minutes === 0 ? '今天的小事还在等它醒来。' : `${motif[3]}，结束这一天。`) : `${motif[phase]}。`;
-    const action = state === 'sleeping' ? `它在${place}里安静休息。`
-      : ocean && role === 'office_worker' && state === 'working' ? `它正在${title}。`
-      : `它${ocean && state === 'traveling' && index === 3 ? '站在船边' : `留在${place}`}，${title}。`;
+    const echo = state === 'sleeping' ? (minutes === 0 ? '今天的小事等醒来后再慢慢开始。' : `${motif[3]}，结束这一天。`) : `${motif[phase]}。`;
+    const action = state === 'sleeping' ? `${name}在${place}里安静休息。`
+      : ocean && role === 'office_worker' && state === 'working' ? `${name}正在${title}。`
+      : `${name}${ocean && state === 'traveling' && index === 3 ? '站在船边' : `留在${place}`}，${title}。`;
     return { time: `${String(Math.floor(minutes/60)).padStart(2,'0')}:${String(minutes%60).padStart(2,'0')}`,
       title, state, description: action + echo, mood: ({sleeping:'睡得安稳',working:'专注而平静',studying:'慢慢想明白',eating:'暖暖的满足',traveling:'满怀好奇',relaxing:'自在松弛'})[state] };
   });
@@ -119,35 +120,37 @@ export function currentIndex(timeline, minutes) {
 }
 
 function period(hour) { return hour < 5 ? '夜深了' : hour < 9 ? '迎来清晨' : hour < 12 ? '是上午' : hour < 14 ? '到了午间' : hour < 18 ? '是下午' : hour < 22 ? '进入晚间' : '夜深了'; }
-export function connectionText(origin, target, title) {
+export function connectionText(origin, target, title, personName = '另一个我') {
+  const name = typeof personName === 'string' && personName.trim() ? personName.trim() : '另一个我';
   const targetPeriod = target.hour < 5 ? '深夜' : target.hour < 9 ? '清晨' : target.hour < 12 ? '上午' : target.hour < 14 ? '午间' : target.hour < 18 ? '下午' : target.hour < 22 ? '晚间' : '深夜';
   const targetTime = target.relativeDay === '今天' ? targetPeriod : `${target.relativeDay}的${targetPeriod}`;
   const transition = target.relativeDay === '昨天' ? '还是' : target.relativeDay === '明天' ? '已是' : '正值';
-  return `你这边${period(origin.hour)}，对面${transition}${targetTime}，它正在${title}。`;
+  return `你这边${period(origin.hour)}，对面${transition}${targetTime}，${name}正在${title}。`;
 }
 
 /** @returns {import('../types').VirtualProfileResult} */
 export function profileMoment(profile, at = new Date()) {
+  const name = typeof profile.character?.name === 'string' && profile.character.name.trim() ? profile.character.name.trim() : '另一个我';
   const ocean = profile.targetLocation.kind === 'ocean';
   const origin = worldAt(profile.originLocation.cityName, profile.originLocation, profile.metadata.originTimezoneData, at);
   const target = worldAt(profile.targetLocation.locationLabel, profile.targetLocation, profile.metadata.timezoneData, at, origin.date, ocean);
   const weather = profile.metadata.weather;
   if (weather?.origin?.date === origin.date) origin.weather = weather.origin;
   if (weather?.target?.date === target.date) target.weather = weather.target;
-  const plan = dailyPlan(profile.selectedAvatar.role, profile.targetLocation, target.date, ocean);
+  const plan = dailyPlan(profile.selectedAvatar.role, profile.targetLocation, target.date, ocean, name);
   const index = currentIndex(plan.timeline, target.localMinutes), item = plan.timeline[index];
   const timeline = plan.timeline.map((entry, i) => ({ ...entry, isCurrent: i === index }));
   const phase = target.localMinutes < 750 ? 0 : target.localMinutes < 1200 ? 1 : 2;
-  const storyText = `${phase === 0 ? '今天它' : '它'}${plan.story.phases[phase]}。`;
-  const connection = connectionText(origin, target, item.title);
+  const storyText = `${phase === 0 ? `${name}今天` : ''}${plan.story.phases[phase]}。`;
+  const connection = connectionText(origin, target, item.title, name);
   const next = timeline[index+1] || { time: '明天', title: '开启新的一天', state: 'relaxing' };
   const scene = { habitat: ocean ? 'boat_cabin' : profile.targetLocation.kind === 'land' ? 'land_home' : 'unknown_home',
     title: ocean ? '船上小屋' : '远方的小屋', isDay: target.isDay,
-    description: ocean ? `${target.isDay ? '白昼照进舷窗' : '夜色包围小船'}，小屋始终停在地球另一端的这个坐标。` : `${target.isDay ? '日光' : '灯光'}陪着它过今天的生活。` };
+    description: ocean ? `${target.isDay ? '白昼照进舷窗' : '夜色包围小船'}，小屋始终停在地球另一端的这个坐标。` : `${target.isDay ? '日光' : '灯光'}陪着${name}过今天的生活。` };
   return { originWorld: origin, targetWorld: target, localTime: target.time, localDateLabel: target.date,
     dayType: plan.dayType, currentState: item.state, currentTitle: item.title,
     currentDescription: item.description, todayMood: item.mood, distanceKm: profile.result?.distanceKm || 20015,
     timeline, dailyStory: { date: target.date, title: plan.story.title, text: storyText }, nextActivity: next, scene,
-    connectionText: connection, shareText: `${origin.place} ${origin.date} ${origin.time} / ${target.place} ${target.date} ${target.time}：它在${item.title}。${storyText}`,
-    activityMeta: { engineVersion: 4, source: 'daily_rules' } };
+    connectionText: connection, shareText: `${origin.place} ${origin.date} ${origin.time} / ${target.place} ${target.date} ${target.time}：${name}正在${item.title}。${storyText}`,
+    activityMeta: { engineVersion: 5, source: 'daily_rules' } };
 }

@@ -91,7 +91,9 @@ export class GeoService {
     const id = `exact-v2:${antipode.latitude}:${antipode.longitude}`;
     const cached = this.store.getGeoCache<GeoData>(id);
     if (cached && cached.geoMeta.resolvedAt && Date.now()-Date.parse(cached.geoMeta.resolvedAt)<86400000) {
-      return {...cached,geoMeta:{...cached.geoMeta,source:'geonames_cache',cached:true}};
+      return {...cached,targetLocation:{...cached.targetLocation,
+        countryCode:cached.targetLocation.countryCode || (cached.targetLocation.kind === 'land' ? cached.timezone?.countryCode : undefined)},
+        geoMeta:{...cached.geoMeta,source:'geonames_cache',cached:true}};
     }
     const [land,oceanResponse,timezone] = await Promise.all([
       this.query('countrySubdivisionJSON',{lat:antipode.latitude,lng:antipode.longitude,radius:0,lang:'zh'}),
@@ -102,7 +104,7 @@ export class GeoService {
     const targetLocation: TargetLocation = {...antipode,kind,
       locationLabel:ocean?.name || (land?.countryCode ? [land.adminName1,land.countryName].filter(Boolean).join(' · ') : '地球另一端'),
       countryName:kind === 'land' ? land!.countryName || '' : '',regionName:kind === 'land' ? land!.adminName1 || '' : '',
-      oceanName:ocean?.name};
+      countryCode:kind === 'land' ? land!.countryCode : undefined,oceanName:ocean?.name};
     const result: GeoData = {antipode,targetLocation,distanceKm:Math.round(Math.PI*6371),ocean,timezone,
       geoMeta:{resolverVersion:2,source:kind === 'unknown' ? 'fallback' : 'geonames',cached:false,resolvedAt:new Date().toISOString()}};
     if (kind !== 'unknown') this.store.saveGeoCache(id,result);

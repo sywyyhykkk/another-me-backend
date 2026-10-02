@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const {clockAt,dailyPlan,profileMoment,worldAt}=require('../dist/domain/world');
 const ocean={latitude:-31.2304,longitude:-58.5263,locationLabel:'South Atlantic Ocean',kind:'ocean'};
 function profile(role='office_worker',kind='ocean'){
- return {selectedAvatar:{role,name:role},originLocation:{latitude:31.2304,longitude:121.4737,cityName:'上海'},
+ return {selectedAvatar:{role,name:role},character:{name:'卢西亚',gender:'female',continent:'SA'},originLocation:{latitude:31.2304,longitude:121.4737,cityName:'上海'},
    targetLocation:{...ocean,kind},metadata:{originTimezoneData:{timezoneId:'Asia/Shanghai'},timezoneData:{timezoneId:'America/Argentina/Buenos_Aires'}},result:{distanceKm:20015}};
 }
 test('昨天、今天、明天和当地周末按目标时区计算',()=>{
@@ -50,6 +50,29 @@ test('确认海洋才使用船舱，船上四角色文案没有城市代理活�
   assert.doesNotMatch(JSON.stringify(m),/通勤|食堂|夜市|教室|街头|搭车/);
  }
  assert.equal(profileMoment(profile('traveler','unknown')).scene.habitat,'unknown_home');
+});
+test('名字贯穿各角色、环境、日期和活动，所有角色文案不用物品代词',()=>{
+ for(const role of ['office_worker','student','freelancer','traveler']) {
+  for(const kind of ['land','ocean','unknown']) {
+   for(const date of ['2026-10-02','2026-10-03','2026-10-04','2026-10-05','2026-10-06','2026-10-07','2026-10-08']) {
+    for(const hour of [0,6,9,12,16,20,23]) {
+     const p=profile(role,kind);
+     const moment=profileMoment(p,new Date(`${date}T${String(hour).padStart(2,'0')}:00:00Z`));
+     assert.doesNotMatch(JSON.stringify(moment),/它/);
+     assert.match(moment.currentDescription,/卢西亚/);
+     assert.match(moment.connectionText,/卢西亚/);
+     assert.match(moment.shareText,/卢西亚/);
+    }
+   }
+  }
+ }
+ const p=profile('student'),at=new Date('2026-10-02T12:00:00Z');
+ const before=profileMoment(p,at);
+ p.character={...p.character,name:'玛雅'};
+ const after=profileMoment(p,at);
+ assert.deepEqual(before.timeline.map(({time,title,state,mood})=>({time,title,state,mood})),after.timeline.map(({time,title,state,mood})=>({time,title,state,mood})));
+ assert.equal(before.dailyStory.title,after.dailyStory.title);
+ assert.match(after.shareText,/玛雅/);
 });
 test('时区支持 DST、零偏移与海洋整数 UTC 估算',()=>{
  assert.equal(clockAt({timezoneId:'Europe/London'},new Date('2026-01-01T00:00:00Z'),120).time,'00:00');

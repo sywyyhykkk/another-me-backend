@@ -62,6 +62,7 @@ test('HTTP 登录、档案与地理服务', async t => {
   const payload = (mode = 'manual', latitude = 31.2304, longitude = 121.4737, role = 'office_worker') => ({
     originLocation: { mode, cityName: mode === 'device' ? '当前位置' : '上海', countryName: '中国', latitude, longitude },
     selectedAvatar: { id: role, role, name: '测试形象', emoji: '💼' }, targetMode: 'antipode',
+    character: { name: '卢西亚', gender: 'female', continent: 'SA' },
   });
   let tokenA, tokenB, first, second, shared;
   try {
@@ -80,7 +81,8 @@ test('HTTP 登录、档案与地理服务', async t => {
     });
     await t.test('所有业务接口验证会话，拒绝伪造和过期身份', async () => {
       for (const [path, method, body] of [['/profiles/active', 'GET'], ['/profiles', 'POST', payload()],
-        ['/profiles', 'DELETE', { deleteActive: true }], ['/geo/origin', 'POST', { latitude: 31, longitude: 121 }]]) {
+        ['/profiles', 'DELETE', { deleteActive: true }], ['/geo/origin', 'POST', { latitude: 31, longitude: 121 }],
+        ['/characters/suggest', 'POST', { originLocation: payload().originLocation, gender: 'female' }]]) {
         assert.equal((await call(path, method, body)).status, 401);
       }
       assert.equal((await call('/profiles/active', 'GET', undefined, 'f'.repeat(64))).status, 401);
@@ -90,16 +92,41 @@ test('HTTP 登录、档案与地理服务', async t => {
     });
     await t.test('拒绝非法坐标、形象和不支持的目标位置', async () => {
       for (const body of [null, {}, payload('manual', 91), payload('manual', 31, 181), payload('manual', 31, 121, 'unknown'),
-        { ...payload(), targetMode: 'custom_location' }, { ...payload(), profileName: 1 }]) {
+        { ...payload(), targetMode: 'custom_location' }, { ...payload(), profileName: 1 },
+        { ...payload(), character: undefined }, { ...payload(), character: null },
+        ...[{ name: '' }, { name: '   ' }, { name: '一'.repeat(13) }, { name: '它' }, { name: '名字\n换行' },
+          { gender: 'invalid' }, { continent: 'invalid' }].map(change => ({ ...payload(), character: { ...payload().character, ...change } }))]) {
         assert.equal((await call('/profiles', 'POST', body, tokenA)).status, 400);
       }
       assert.equal((await call('/geo/origin', 'POST', { latitude: '31', longitude: 121 }, tokenA)).status, 400);
     });
+    await t.test('名字建议按实际目标大洲和性别生成，可换名且不创建档案', async () => {
+      const body = { originLocation: payload().originLocation, gender: 'female' };
+      for (const invalid of [null, {}, { ...body, gender: 'unknown' }, { ...body, originLocation: { ...body.originLocation, latitude: 91 } }]) {
+        assert.equal((await call('/characters/suggest', 'POST', invalid, tokenA)).status, 400);
+      }
+      const suggested = await call('/characters/suggest', 'POST', body, tokenA);
+      assert.equal(suggested.status, 201);
+      const identity = suggested.body.data;
+      assert.equal(identity.continent, 'SA');
+      assert.equal(identity.gender, 'female');
+      assert.ok(identity.continentLabel && identity.locationLabel);
+      assert.equal(identity.targetKind, 'land');
+      assert.ok([...identity.name].length >= 1 && [...identity.name].length <= 12);
+      assert.doesNotMatch(identity.name, /它/);
+      const changed = (await call('/characters/suggest', 'POST', { ...body, excludeName: identity.name }, tokenA)).body.data;
+      assert.notEqual(changed.name, identity.name);
+      assert.equal((await call('/profiles/active', 'GET', undefined, tokenA)).body.exists, false);
+    });
     await t.test('手动选城创建档案，返回同步活动、日程与双世界内容', async () => {
-      const created = await call('/profiles', 'POST', { ...payload(), openid: 'user-b' }, tokenA);
+      const created = await call('/profiles', 'POST', { ...payload(), character: { name: '  卢西亚  ', gender: 'female', continent: 'AS' }, openid: 'user-b' }, tokenA);
       assert.equal(created.status, 201);
       first = created.body.data;
       assert.equal(first.openid, 'user-a');
+      assert.deepEqual(first.character, { name: '卢西亚', gender: 'female', continent: 'SA' });
+      assert.match(first.profileName, /卢西亚/);
+      assert.doesNotMatch(JSON.stringify(first.result), /它/);
+      assert.match(first.result.currentDescription, /卢西亚/);
       assert.deepEqual(first.antipode, {latitude:-31.2304,longitude:121.4737-180});
       assert.equal(first.targetLocation.kind,'land');
       assert.equal(first.metadata.geo.resolverVersion,2);
@@ -121,6 +148,7 @@ test('HTTP 登录、档案与地理服务', async t => {
       assert.equal(geoCalls, count);
       const forced = await call('/profiles/active?forceRefresh=true', 'GET', undefined, tokenA);
       assert.equal(forced.body.data._id, first._id);
+      assert.deepEqual(forced.body.data.character, first.character);
       assert.ok(Date.parse(forced.body.data.metadata.lastRefreshedAt) >= Date.parse(first.metadata.lastRefreshedAt));
       assert.equal(geoCalls, count);
     });
@@ -130,8 +158,10 @@ test('HTTP 登录、档案与地理服务', async t => {
       assert.equal(response.status,201);
       shared=response.body.data;
       assert.ok(shared.capturedAt && shared.originWorld.date && shared.targetWorld.date && shared.currentState);
+      assert.deepEqual(shared.character, { name: '卢西亚', gender: 'female' });
+      assert.doesNotMatch(shared.shareText, /它/);
       const serialized=JSON.stringify(shared);
-      for (const field of ['openid','originLocation','targetLocation','latitude','longitude','profileId','token']) {
+      for (const field of ['openid','originLocation','targetLocation','latitude','longitude','profileId','token','continent']) {
         assert.ok(!serialized.includes('"'+field+'"'),field);
       }
       assert.equal((await call('/shares/'+shared.id,'DELETE',{},tokenB)).status,404);
@@ -143,11 +173,17 @@ test('HTTP 登录、档案与地理服务', async t => {
       const store=app.get(StoreService);
       const old=store.getActiveProfile('user-a');
       store.updateProfile({...old,metadata:{...old.metadata,version:1,geo:{resolverVersion:1}},
-        targetLocation:{...old.targetLocation,latitude:0,longitude:0}});
+        character: undefined, targetLocation:{...old.targetLocation,latitude:0,longitude:0}});
       const updated=(await call('/profiles/active','GET',undefined,tokenA)).body.data;
       assert.deepEqual(updated.antipode,first.antipode);
       assert.equal(updated.metadata.geo.resolverVersion,2);
       assert.ok(!('nearestPlace' in updated.metadata));
+      assert.ok(updated.character.name);
+      assert.equal(updated.character.gender, 'unspecified');
+      const again=(await call('/profiles/active','GET',undefined,tokenA)).body.data;
+      assert.deepEqual(again.character,updated.character);
+      assert.deepEqual(store.getActiveProfile('user-a').character,updated.character);
+      assert.doesNotMatch(JSON.stringify(updated.result),/它/);
     });
     await t.test('用户之间无法读取或删除对方档案', async () => {
       assert.equal((await call('/profiles/active', 'GET', undefined, tokenB)).body.exists, false);
