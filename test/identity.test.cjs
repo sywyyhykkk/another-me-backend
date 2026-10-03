@@ -55,7 +55,14 @@ test('已确认国家优先，海洋按球面邻近大洲分区且跨日期线�
     assert.notEqual(next.name,first.name);
     assert.ok(NAME_POOLS.SA.female.includes(next.name));
   }
-  assert.match(first.continentLabel,/海上命名参考/);
+  assert.equal(first.continentLabel,'南美洲');
+  for (const kind of ['land','ocean','unknown']) {
+    const suggestion = suggestCharacter({...target,kind,countryCode:'AR'},'female');
+    assert.equal(suggestion.continent,'SA');
+    assert.equal(suggestion.continentLabel,'南美洲');
+    assert.equal(suggestion.targetKind,kind);
+    assert.equal(suggestion.locationLabel,target.locationLabel);
+  }
   assert.equal(JSON.stringify(target),before);
 });
 

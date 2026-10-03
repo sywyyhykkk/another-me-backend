@@ -123,7 +123,7 @@ export function suggestCharacter(target, gender, excludeName) {
   const continent = continentFor(target);
   const names = namesFor(continent, gender).filter(name => name !== excludeName?.trim());
   return {name:names[randomInt(names.length)], gender, continent,
-    continentLabel:CONTINENT_LABELS[continent] + (target.kind === 'ocean' ? ' · 海上命名参考' : target.kind === 'unknown' ? ' · 坐标命名参考' : ''),
+    continentLabel:CONTINENT_LABELS[continent],
     locationLabel:target.locationLabel, targetKind:target.kind};
 }
 
